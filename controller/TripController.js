@@ -1,88 +1,241 @@
-const {trips} = require("../models/trips");
+const { db } = require("../db.js");
+const { isMissing, trimText, isValidId, isPositiveNumber } = require("../utils/validation.js");
 
-const retrieveAllTrips = (req, res) => {
-    const allTrips = trips;
+const createTrip = async (req, res) => {
+    let { destination, country, cost } = req.body || {};
 
-    res.send(allTrips);
-};
-
-const createTrip = (req, res) => {
-    const { destination, country, cost, description } = req.body;
-
-
-    if (!destination || !country || !cost == null) {
+    if (isMissing(destination) || isMissing(country) || isMissing(cost)) {
         return res.status(400).json({
             status: "fail",
             message: "All fields are required."
         });
     }
 
-    const newTrip = {
-        id: trips.length + 1,
-        destination,
-        country,
-        cost,
-        description: description || "No description available"
-    };
+    if (!isPositiveNumber(cost)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "Cost must be a positive number."
+        });
+    }
 
-    trips.push(newTrip);
+    destination = trimText(destination);
+    country = trimText(country);
 
-    res.status(201).json({
-        status: "success",
-        message: "Trip created successfully",
-        data: newTrip
-    });
+    try {
+        const [result] = await db.query(
+            "INSERT INTO trips (destination, country, cost) VALUES (?, ?, ?)",
+            [destination, country, cost]
+        );
+
+        res.status(201).json({
+            status: "success",
+            message: "You are going to " + destination,
+            data: { id: result.insertId, destination, country, cost }
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
 };
 
-const retrieveTripById = (req, res) => {
+const retrieveAllTrips = async (req, res) => {
+    try {
+        const [rows] = await db.query("SELECT * FROM trips");
+
+        res.status(200).json({
+            status: "success",
+            message: "Trips retrieved successfully",
+            results: rows.length,
+            data: rows
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
+};
+
+const retrieveTripById = async (req, res) => {
     const id = Number(req.params.id);
 
-    for (let i = 0; i < trips.length; i++) {
-        if (trips[i].id === id) {
-            return res.status(200).json({
-                status: "success",
-                data: trips[i]
+    if (!isValidId(id)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "ID must be a positive integer."
+        });
+    }
+
+    try {
+        const [rows] = await db.query("SELECT * FROM trips WHERE id = ?", [id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                status: "fail",
+                message: "Trip not found"
             });
         }
 
-        return res.status(404).json({
-            status: "fail",
-            message: "Trip not found"
+        res.status(200).json({
+            status: "success",
+            message: "Trip retrieved successfully",
+            data: rows[0]
         });
-    }}
-
-
-
-    const checkBudget = (req, res) => {
-        const budget = req.body.budget;
-        console.log("in middleware");
-       
-
-        const affordableTrips = [];
-
-        for (let i = 0; i < trips.length; i++){
-            if (trips[i].cost <= budget){
-                affordableTrips.push(trips[i]) 
-                 
-            
-            }
-        }
-
-        return res.status(200).json({
-            message: "successfully retrieved"
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
         });
-    
-
-        
-
-        
     }
-
-    module.exports = {
-    retrieveAllTrips,
-    createTrip,
-    retrieveTripById,
-    checkBudget
 };
 
+const checkBudget = async (req, res) => {
+    const { budget } = req.body || {};
 
+    try {
+        const [rows] = await db.query("SELECT * FROM trips WHERE cost <= ?", [budget]);
+
+        res.status(200).json({
+            status: "success",
+            message: "Trips within your budget",
+            results: rows.length,
+            data: rows
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
+};
+
+const updateTrip = async (req, res) => {
+    const id = Number(req.params.id);
+    let { destination, country, cost } = req.body || {};
+
+    if (!isValidId(id)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "ID must be a positive integer."
+        });
+    }
+
+    if (isMissing(destination) || isMissing(country) || isMissing(cost)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "All fields are required."
+        });
+    }
+
+    if (!isPositiveNumber(cost)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "Cost must be a positive number."
+        });
+    }
+
+    destination = trimText(destination);
+    country = trimText(country);
+
+    try {
+        const [result] = await db.query(
+            "UPDATE trips SET destination = ?, country = ?, cost = ? WHERE id = ?",
+            [destination, country, cost, id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                status: "fail",
+                message: "Trip not found"
+            });
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: "Trip updated successfully",
+            data: { id, destination, country, cost }
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
+};
+
+const deleteTrip = async (req, res) => {
+    const id = Number(req.params.id);
+
+    if (!isValidId(id)) {
+        return res.status(400).json({
+            status: "fail",
+            message: "ID must be a positive integer."
+        });
+    }
+
+    try {
+        const [result] = await db.query("DELETE FROM trips WHERE id = ?", [id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                status: "fail",
+                message: "Trip not found"
+            });
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: "Trip deleted successfully"
+        });
+    } catch (error) {
+        if (error.code === "ER_ROW_IS_REFERENCED_2") {
+            return res.status(409).json({
+                status: "fail",
+                message: "Cannot delete this trip because it has reviews."
+            });
+        }
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
+};
+
+const getTripRatings = async (req, res) => {
+    try {
+        const [rows] = await db.query(
+            "SELECT t.id, t.destination, t.country, r.rating FROM trips t LEFT JOIN reviews r ON t.id = r.trip_id"
+        );
+
+        res.status(200).json({
+            status: "success",
+            message: "Trips and ratings retrieved successfully",
+            results: rows.length,
+            data: rows
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            status: "error",
+            message: "Database error"
+        });
+    }
+};
+
+module.exports = {
+    createTrip,
+    retrieveAllTrips,
+    retrieveTripById,
+    checkBudget,
+    updateTrip,
+    deleteTrip,
+    getTripRatings
+};
